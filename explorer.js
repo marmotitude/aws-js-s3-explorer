@@ -113,17 +113,17 @@ function path2short(path, escape = false) {
 }
 
 // Virtual-hosted-style URL, ex: https://mybucket1.s3.amazonaws.com/index.html
-function object2hrefvirt(bucket, key, escape = false) {
+function object2hrefvirt(bucket, key, region, escape = false) {
     const enckey = key.split('/').map(x => encodeURIComponent(x)).join('/');
-    const rc = `${document.location.protocol}//${bucket}.s3.amazonaws.com/${enckey}`;
+    const rc = `${document.location.protocol}//${bucket}.${region}.magaluobjects.com/${enckey}`;
     return escape ? htmlEscape(rc) : rc;
 }
 
 // Path-style URLs, ex: https://s3.amazonaws.com/mybucket1/index.html
 // eslint-disable-next-line no-unused-vars
-function object2hrefpath(bucket, key, escape = false) {
+function object2hrefpath(bucket, key, region, escape = false) {
     const enckey = key.split('/').map(x => encodeURIComponent(x)).join('/');
-    const rc = `${document.location.protocol}//s3.amazonaws.com/${bucket}/${enckey}`;
+    const rc = `${document.location.protocol}//${region}.magaluobjects.com/${bucket}/${enckey}`;
     return escape ? htmlEscape(rc) : rc;
 }
 
@@ -146,7 +146,7 @@ function SharedService($rootScope) {
     };
 
     shared.getSettings = () => this.settings;
-
+    
     shared.addFiles = (files) => { this.added_files = files; };
 
     shared.getAddedFiles = () => this.added_files;
@@ -241,7 +241,12 @@ function SharedService($rootScope) {
     // S3 endpoint otherwise we might create URLs that are immediately invalid,
     // for example if the client's browser time is 55 minutes behind S3's time.
     shared.correctClockSkew = (Bucket) => {
-        const s3 = new AWS.S3();
+        //const s3 = new AWS.S3();
+        const settings= SharedService.getSettings();
+        const s3 = new AWS.S3({
+            endpoint: `${settings.region}.magaluobjects.com`,
+            s3ForcePathStyle: true
+        });
         DEBUG.log('Invoke headBucket:', Bucket);
 
         // Head the bucket to get a Date response. The 'date' header will need
@@ -311,7 +316,11 @@ function ViewController($scope, SharedService) {
         } else {
             // Authenticated user has clicked on an object so create pre-signed
             // URL and download it in new window/tab
-            const s3 = new AWS.S3();
+            const settings= SharedService.getSettings();
+            const s3 = new AWS.S3({
+                endpoint: `${settings.region}.magaluobjects.com`,
+                s3ForcePathStyle: true
+            });
             const params = {
                 Bucket: $scope.view.settings.bucket, Key: target.dataset.s3key, Expires: 15,
             };
@@ -383,7 +392,8 @@ function ViewController($scope, SharedService) {
 
     $scope.renderObject = (data, _type, full) => {
         // DEBUG.log('renderObject:', JSON.stringify(full));
-        const hrefv = object2hrefvirt($scope.view.settings.bucket, data);
+        const settings= SharedService.getSettings();
+        const hrefv = object2hrefvirt($scope.view.settings.bucket, data, settings.region);
 
         function buildAnchor(s3key, href, text, download) {
             const a = $('<a>');
@@ -588,7 +598,12 @@ function ViewController($scope, SharedService) {
                 $bl.removeClass('fa-spin');
             } else if (data.IsTruncated) {
                 DEBUG.log('Bucket', data.Name, 'truncated');
-                const s3 = new AWS.S3(AWS.config);
+                //const s3 = new AWS.S3(AWS.config);
+                const settings= SharedService.getSettings();
+                const s3 = new AWS.S3({
+                    endpoint: `${settings.region}.magaluobjects.com`,
+                    s3ForcePathStyle: true
+                });
                 if (AWS.config.credentials && AWS.config.credentials.accessKeyId) {
                     DEBUG.log('Make S3 authenticated call to listObjects');
                     s3.listObjects(params, $scope.listobjectscb);
@@ -619,7 +634,12 @@ function ViewController($scope, SharedService) {
             $tb.DataTable().column(s3ExplorerColumns.folder).visible(!Delimiter);
         }
 
-        const s3 = new AWS.S3(AWS.config);
+        //const s3 = new AWS.S3(AWS.config);
+        const settings= SharedService.getSettings();
+        const s3 = new AWS.S3({
+            endpoint: `${settings.region}.magaluobjects.com`,
+            s3ForcePathStyle: true
+        });
         const params = {
             Bucket, Prefix, Delimiter, Marker,
         };
@@ -811,7 +831,12 @@ function AddFolderController($scope, SharedService) {
         const folder = `${stripLeadTrailSlash(vpef)}/`;
         DEBUG.log('Calculated folder:', folder);
 
-        const s3 = new AWS.S3(AWS.config);
+        //const s3 = new AWS.S3(AWS.config);
+        const settings= SharedService.getSettings();
+        const s3 = new AWS.S3({
+            endpoint: `${settings.region}.magaluobjects.com`,
+            s3ForcePathStyle: true
+        });
         const params = { Bucket: $scope.add_folder.bucket, Key: folder };
 
         DEBUG.log('Invoke headObject:', params);
@@ -860,55 +885,55 @@ function InfoController($scope) {
         DEBUG.log('InfoController', 'broadcast change settings bucket:', args.settings.bucket);
         $scope.info.settings = args.settings;
         $scope.info.bucket = args.settings.bucket;
-        $scope.getBucketCors(args.settings.bucket);
-        $scope.getBucketPolicy(args.settings.bucket);
+        // $scope.getBucketCors(args.settings.bucket);
+        // $scope.getBucketPolicy(args.settings.bucket);
     });
 
-    $scope.getBucketPolicy = (Bucket) => {
-        const params = { Bucket };
-        $scope.info.policy = null;
-        DEBUG.log('call getBucketPolicy:', Bucket);
+    // $scope.getBucketPolicy = (Bucket) => {
+    //     const params = { Bucket };
+    //     $scope.info.policy = null;
+    //     DEBUG.log('call getBucketPolicy:', Bucket);
 
-        new AWS.S3(AWS.config).getBucketPolicy(params, (err, data) => {
-            let text;
-            if (err && err.code === 'NoSuchBucketPolicy') {
-                DEBUG.log(err);
-                text = 'No bucket policy.';
-            } else if (err) {
-                DEBUG.log(err);
-                text = JSON.stringify(err);
-            } else {
-                DEBUG.log(data.Policy);
-                $scope.info.policy = data.Policy;
-                DEBUG.log('Info:', $scope.info);
-                text = JSON.stringify(JSON.parse(data.Policy.trim()), null, 2);
-            }
-            $('#info-policy').text(text);
-        });
-    };
+    //     new AWS.S3(AWS.config).getBucketPolicy(params, (err, data) => {
+    //         let text;
+    //         if (err && err.code === 'NoSuchBucketPolicy') {
+    //             DEBUG.log(err);
+    //             text = 'No bucket policy.';
+    //         } else if (err) {
+    //             DEBUG.log(err);
+    //             text = JSON.stringify(err);
+    //         } else {
+    //             DEBUG.log(data.Policy);
+    //             $scope.info.policy = data.Policy;
+    //             DEBUG.log('Info:', $scope.info);
+    //             text = JSON.stringify(JSON.parse(data.Policy.trim()), null, 2);
+    //         }
+    //         $('#info-policy').text(text);
+    //     });
+    // };
 
-    $scope.getBucketCors = (Bucket) => {
-        const params = { Bucket };
-        $scope.info.cors = null;
-        DEBUG.log('call getBucketCors:', Bucket);
+    // $scope.getBucketCors = (Bucket) => {
+    //     const params = { Bucket };
+    //     $scope.info.cors = null;
+    //     DEBUG.log('call getBucketCors:', Bucket);
 
-        new AWS.S3(AWS.config).getBucketCors(params, (err, data) => {
-            let text;
-            if (err && err.code === 'NoSuchCORSConfiguration') {
-                DEBUG.log(err);
-                text = 'This bucket has no CORS configuration.';
-            } else if (err) {
-                DEBUG.log(err);
-                text = JSON.stringify(err);
-            } else {
-                DEBUG.log(data.CORSRules);
-                [$scope.info.cors] = data.CORSRules;
-                DEBUG.log('Info:', $scope.info);
-                text = JSON.stringify(data.CORSRules, null, 2);
-            }
-            $('#info-cors').text(text);
-        });
-    };
+    //     new AWS.S3(AWS.config).getBucketCors(params, (err, data) => {
+    //         let text;
+    //         if (err && err.code === 'NoSuchCORSConfiguration') {
+    //             DEBUG.log(err);
+    //             text = 'This bucket has no CORS configuration.';
+    //         } else if (err) {
+    //             DEBUG.log(err);
+    //             text = JSON.stringify(err);
+    //         } else {
+    //             DEBUG.log(data.CORSRules);
+    //             [$scope.info.cors] = data.CORSRules;
+    //             DEBUG.log('Info:', $scope.info);
+    //             text = JSON.stringify(data.CORSRules, null, 2);
+    //         }
+    //         $('#info-cors').text(text);
+    //     });
+    // };
 }
 
 //
@@ -1008,7 +1033,12 @@ function UploadController($scope, SharedService) {
                 `<div class="progress"><span id="upload-td-progress-${ii}" class="progress-bar" data-percent="0">0%</span></div>`,
             );
 
-            const s3 = new AWS.S3(AWS.config);
+            //const s3 = new AWS.S3(AWS.config);
+            const settings= SharedService.getSettings();
+            const s3 = new AWS.S3({
+                endpoint: `${settings.region}.magaluobjects.com`,
+                s3ForcePathStyle: true
+            });
             const params = {
                 Body: file.file, Bucket, Key: (prefix || '') + (file.file.fullPath ? file.file.fullPath : file.file.name), ContentType: file.file.type,
             };
@@ -1306,7 +1336,12 @@ function TrashController($scope, SharedService) {
             DEBUG.log('Object:', objects[ii]);
             DEBUG.log('Index:', ii);
 
-            const s3 = new AWS.S3(AWS.config);
+            //const s3 = new AWS.S3(AWS.config);
+            const settings= SharedService.getSettings();
+            const s3 = new AWS.S3({
+                endpoint: `${settings.region}.magaluobjects.com`,
+                s3ForcePathStyle: true
+            });
 
             // If the user is deleting a folder then recursively list
             // objects and delete them
